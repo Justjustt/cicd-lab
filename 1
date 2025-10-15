@@ -1,0 +1,98 @@
+Branch indexing
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/caches/git-8e4f64777a1e3dd553fec211139aa955/.git # timeout=10
+Setting origin to https://github.com/Justjustt/cicd-lab
+ > git config remote.origin.url https://github.com/Justjustt/cicd-lab # timeout=10
+Fetching origin...
+Fetching upstream changes from origin
+ > git --version # timeout=10
+ > git --version # 'git version 2.51.0'
+ > git config --get remote.origin.url # timeout=10
+ > git fetch --no-tags --force --progress -- origin +refs/heads/*:refs/remotes/origin/* # timeout=10
+Seen branch in repository origin/dev
+Seen branch in repository origin/main
+Seen 2 remote branches
+Obtained Jenkinsfile from 518d7bf0f939b256f5baf3155b41206d841b463c
+[Pipeline] Start of Pipeline
+[Pipeline] node
+Running on Jenkins
+ in /var/lib/jenkins/workspace/CICD_main
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Declarative: Checkout SCM)
+[Pipeline] checkout
+Selected Git installation does not exist. Using Default
+The recommended git tool is: NONE
+No credentials specified
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/CICD_main/.git # timeout=10
+Fetching changes from the remote Git repository
+ > git config remote.origin.url https://github.com/Justjustt/cicd-lab # timeout=10
+Fetching without tags
+Fetching upstream changes from https://github.com/Justjustt/cicd-lab
+ > git --version # timeout=10
+ > git --version # 'git version 2.51.0'
+ > git fetch --no-tags --force --progress -- https://github.com/Justjustt/cicd-lab +refs/heads/*:refs/remotes/origin/* # timeout=10
+Checking out Revision 518d7bf0f939b256f5baf3155b41206d841b463c (main)
+ > git config core.sparsecheckout # timeout=10
+ > git checkout -f 518d7bf0f939b256f5baf3155b41206d841b463c # timeout=10
+Commit message: "node js failed to install - fix?"
+ > git rev-list --no-walk b4158638f198652a3e55612d90833c9c10d01073 # timeout=10
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] withEnv
+[Pipeline] {
+[Pipeline] stage
+[Pipeline] { (Declarative: Tool Install)
+[Pipeline] tool
+Unpacking https://nodejs.org/dist/v7.8.0/node-v7.8.0-linux-x64.tar.gz to /var/lib/jenkins/tools/jenkins.plugins.nodejs.tools.NodeJSInstallation/Node_7.8.0 on Jenkins
+
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+java.io.EOFException: Unexpected end of ZLIB input stream
+	at java.base/java.util.zip.InflaterInputStream.fill(InflaterInputStream.java:244)
+	at java.base/java.util.zip.InflaterInputStream.read(InflaterInputStream.java:158)
+	at java.base/java.util.zip.GZIPInputStream.read(GZIPInputStream.java:117)
+	at org.apache.tools.tar.TarBuffer.readBlock(TarBuffer.java:253)
+	at org.apache.tools.tar.TarBuffer.readRecord(TarBuffer.java:220)
+	at org.apache.tools.tar.TarInputStream.read(TarInputStream.java:613)
+	at java.base/java.io.FilterInputStream.read(FilterInputStream.java:106)
+	at org.apache.commons.io.IOUtils.copyLarge(IOUtils.java:1456)
+	at org.apache.commons.io.IOUtils.copy(IOUtils.java:1081)
+	at org.apache.commons.io.IOUtils.copyLarge(IOUtils.java:1429)
+	at org.apache.commons.io.IOUtils.copy(IOUtils.java:1059)
+	at hudson.util.IOUtils.copy(IOUtils.java:53)
+	at hudson.FilePath.readFromTar(FilePath.java:3070)
+Caused: java.io.IOException: Failed to extract input stream
+	at hudson.FilePath.readFromTar(FilePath.java:3080)
+	at hudson.FilePath.readFromTar(FilePath.java:3044)
+	at hudson.FilePath$UntarFrom.invoke(FilePath.java:915)
+	at hudson.FilePath$UntarFrom.invoke(FilePath.java:904)
+	at hudson.FilePath.act(FilePath.java:1210)
+	at hudson.FilePath.act(FilePath.java:1193)
+	at hudson.FilePath.untarFrom(FilePath.java:900)
+	at hudson.FilePath.installIfNecessaryFrom(FilePath.java:1045)
+Caused: java.io.IOException: Failed to unpack https://nodejs.org/dist/v7.8.0/node-v7.8.0-linux-x64.tar.gz (5439488 bytes read of total 15465639)
+	at hudson.FilePath.installIfNecessaryFrom(FilePath.java:1047)
+Also:   org.jenkinsci.plugins.workflow.actions.ErrorAction$ErrorId: 6d07ff82-549f-4553-ab6d-4741079ae43f
+Caused: java.io.IOException: Failed to install https://nodejs.org/dist/v7.8.0/node-v7.8.0-linux-x64.tar.gz to /var/lib/jenkins/tools/jenkins.plugins.nodejs.tools.NodeJSInstallation/Node_7.8.0
+	at hudson.FilePath.installIfNecessaryFrom(FilePath.java:1057)
+	at hudson.FilePath.installIfNecessaryFrom(FilePath.java:953)
+	at PluginClassLoader for nodejs//jenkins.plugins.nodejs.tools.NodeJSInstaller.performInstallation(NodeJSInstaller.java:145)
+	at hudson.tools.InstallerTranslator.getToolHome(InstallerTranslator.java:67)
+	at hudson.tools.ToolLocationNodeProperty.getToolHome(ToolLocationNodeProperty.java:109)
+	at hudson.tools.ToolInstallation.translateFor(ToolInstallation.java:221)
+	at PluginClassLoader for nodejs//jenkins.plugins.nodejs.tools.NodeJSInstallation.forNode(NodeJSInstallation.java:95)
+	at PluginClassLoader for nodejs//jenkins.plugins.nodejs.tools.NodeJSInstallation.forNode(NodeJSInstallation.java:63)
+	at PluginClassLoader for workflow-basic-steps//org.jenkinsci.plugins.workflow.steps.ToolStep$Execution.run(ToolStep.java:157)
+	at PluginClassLoader for workflow-basic-steps//org.jenkinsci.plugins.workflow.steps.ToolStep$Execution.run(ToolStep.java:138)
+	at PluginClassLoader for workflow-step-api//org.jenkinsci.plugins.workflow.steps.SynchronousNonBlockingStepExecution.lambda$start$0(SynchronousNonBlockingStepExecution.java:49)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:539)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+Finished: FAILURE
