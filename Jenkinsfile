@@ -8,7 +8,7 @@ pipeline {
     }
     
     environment {
-        DOCKERHUB_REPO = 'your-dockerhub-username'
+        DOCKERHUB_REPO = 'jus7'
         DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
         DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
         DOCKER_CREDENTIALS = 'dockerhub-credentials'
