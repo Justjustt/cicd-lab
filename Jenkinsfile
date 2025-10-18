@@ -6,7 +6,6 @@ pipeline {
     }
     
     environment {
-        DOCKER_REGISTRY = 'docker.io'
         DOCKER_IMAGE_MAIN = 'nodemain:v1.0'
         DOCKER_IMAGE_DEV = 'nodedev:v1.0'
         PORT_MAIN = '3000'
@@ -16,7 +15,7 @@ pipeline {
     stages {
         stage('Checkout SCM') {
             steps {
-                echo "Checking out from branch: ${BRANCH_NAME ?: env.GIT_BRANCH}"
+                echo "Checking out from branch: ${BRANCH_NAME}"
                 checkout scm
             }
         }
@@ -39,7 +38,7 @@ pipeline {
             steps {
                 script {
                     def dockerImage
-                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null) {
+                    if (env.BRANCH_NAME == 'main') {
                         dockerImage = "${DOCKER_IMAGE_MAIN}"
                     } else if (env.BRANCH_NAME == 'dev') {
                         dockerImage = "${DOCKER_IMAGE_DEV}"
@@ -56,7 +55,7 @@ pipeline {
                     def dockerImage
                     def port
                     
-                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null) {
+                    if (env.BRANCH_NAME == 'main') {
                         dockerImage = "${DOCKER_IMAGE_MAIN}"
                         port = "${PORT_MAIN}"
                     } else if (env.BRANCH_NAME == 'dev') {
@@ -66,20 +65,29 @@ pipeline {
                     
                     echo "Deploying ${dockerImage} on port ${port}..."
                     
-                    // Stop and remove existing containers
-                    sh '''
-                        docker ps -a | grep -E "${DOCKER_IMAGE_MAIN}|${DOCKER_IMAGE_DEV}" | awk '{print $1}' | xargs -r docker stop
-                        docker ps -a | grep -E "${DOCKER_IMAGE_MAIN}|${DOCKER_IMAGE_DEV}" | awk '{print $1}' | xargs -r docker rm
-                    '''
+                    // Stop and remove ONLY containers for this specific environment
+                    sh """
+                        echo "Stopping containers for ${env.BRANCH_NAME} environment..."
+                        CONTAINER_ID=\$(docker ps -q --filter "publish=${port}")
+                        if [ ! -z "\$CONTAINER_ID" ]; then
+                            echo "Stopping container: \$CONTAINER_ID"
+                            docker stop \$CONTAINER_ID
+                            docker rm \$CONTAINER_ID
+                        else
+                            echo "No running container found on port ${port}"
+                        fi
+                    """
                     
-                    // Run new container based on branch
-                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null) {
-                        sh "docker run -d --expose ${PORT_MAIN} -p ${PORT_MAIN}:3000 ${dockerImage}"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        sh "docker run -d --expose ${PORT_DEV} -p ${PORT_DEV}:3000 ${dockerImage}"
-                    }
+                    // Run new container
+                    sh """
+                        docker run -d \\
+                            --name ${env.BRANCH_NAME}-app-${BUILD_NUMBER} \\
+                            --expose ${port} \\
+                            -p ${port}:3000 \\
+                            ${dockerImage}
+                    """
                     
-                    echo "Deployment complete! Access application at http://localhost:${port}"
+                    echo "Deployment complete! Access at http://localhost:${port}"
                 }
             }
         }
