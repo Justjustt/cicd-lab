@@ -1,3 +1,5 @@
+@Library('jenkins-shared-library') _
+
 pipeline {
     agent any
     
@@ -6,7 +8,7 @@ pipeline {
     }
     
     environment {
-        DOCKERHUB_REPO = 'jus7'
+        DOCKERHUB_REPO = 'your-dockerhub-username'
         DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
         DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
         DOCKER_CREDENTIALS = 'dockerhub-credentials'
@@ -19,6 +21,13 @@ pipeline {
             steps {
                 echo "Checking out from branch: ${BRANCH_NAME}"
                 checkout scm
+            }
+        }
+        
+        stage('Lint Dockerfile') {
+            steps {
+                echo "Linting Dockerfile with Hadolint..."
+                sh 'hadolint Dockerfile || true'
             }
         }
         
@@ -47,6 +56,31 @@ pipeline {
                     }
                     echo "Building Docker image: ${dockerImage}"
                     sh "docker build -t ${dockerImage} ."
+                }
+            }
+        }
+        
+        stage('Scan with Trivy') {
+            steps {
+                script {
+                    def dockerImage
+                    if (env.BRANCH_NAME == 'main') {
+                        dockerImage = "${DOCKER_IMAGE_MAIN}"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        dockerImage = "${DOCKER_IMAGE_DEV}"
+                    }
+                    
+                    echo "Scanning image with Trivy: ${dockerImage}"
+                    
+                    sh """
+                        trivy image --severity HIGH,CRITICAL \\
+                            --format json \\
+                            --output trivy-report.json \\
+                            ${dockerImage} || true
+                        
+                        trivy image --severity HIGH,CRITICAL \\
+                            ${dockerImage} || true
+                    """
                 }
             }
         }
@@ -128,7 +162,14 @@ pipeline {
     
     post {
         always {
+            archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
             echo "Pipeline execution completed"
+        }
+        success {
+            echo "✓ Build and deployment successful!"
+        }
+        failure {
+            echo "✗ Build or deployment failed!"
         }
     }
 }
