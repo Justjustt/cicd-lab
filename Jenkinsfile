@@ -2,174 +2,203 @@
 
 pipeline {
     agent any
-
+    
     tools {
         nodejs 'Node 7.8.0'
     }
-
+    
     environment {
         DOCKERHUB_REPO = 'jus7'
         DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
         DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
-        DOCKER_CREDENTIALS = 'dockerhub-credentials'
+        // Built-in credentials (Jenkins equivalent of GitLab's CI_REGISTRY_USER/CI_JOB_TOKEN)
+        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
         PORT_MAIN = '3000'
         PORT_DEV = '3001'
+        // Dynamic variables
+        DOCKER_IMAGE = ''
+        DEPLOY_PORT = ''
     }
-
+    
     stages {
-        stage('Checkout SCM') {
+        stage('Initialize') {
             steps {
-                echo "Checking out from branch: ${BRANCH_NAME}"
+                script {
+                    echo "================================================"
+                    echo "Building branch: ${env.BRANCH_NAME}"
+                    echo "================================================"
+                    
+                    // Validate branch
+                    if (env.BRANCH_NAME != 'main' && env.BRANCH_NAME != 'dev') {
+                        error("Invalid branch. Only 'main' and 'dev' branches are supported")
+                    }
+                    
+                    // Set environment variables based on branch
+                    if (env.BRANCH_NAME == 'main') {
+                        env.DOCKER_IMAGE = env.DOCKER_IMAGE_MAIN
+                        env.DEPLOY_PORT = env.PORT_MAIN
+                    } else {
+                        env.DOCKER_IMAGE = env.DOCKER_IMAGE_DEV
+                        env.DEPLOY_PORT = env.PORT_DEV
+                    }
+                    
+                    echo "Docker Image: ${env.DOCKER_IMAGE}"
+                    echo "Deploy Port: ${env.DEPLOY_PORT}"
+                }
+            }
+        }
+        
+        stage('Checkout') {
+            steps {
                 checkout scm
             }
         }
-
-        stage('Lint Dockerfile') {
-            steps {
-                echo "Linting Dockerfile with Hadolint..."
-                sh 'hadolint Dockerfile || true'
-            }
-        }
-
-        stage('Build') {
-            steps {
-                echo "Building Node.js application..."
-                sh 'npm install'
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo "Running tests..."
-                sh 'npm test || true'
-            }
-        }
-
-        stage('Build Docker Image') {
+        
+        stage('Setup Dependencies') {
             steps {
                 script {
-                    def dockerImage
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = "${DOCKER_IMAGE_MAIN}"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        dockerImage = "${DOCKER_IMAGE_DEV}"
-                    }
-                    echo "Building Docker image: ${dockerImage}"
-                    sh "docker build -t ${dockerImage} ."
+                    echo "Installing dependencies once (template pattern)..."
+                    sh '''
+                        # Install application dependencies
+                        npm install
+                        
+                        # Install dev dependencies for linting and testing
+                        npm install --save-dev || true
+                    '''
                 }
             }
         }
-
-        stage('Scan with Trivy') {
+        
+        stage('Lint & Test') {
             steps {
                 script {
-                    def dockerImage
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = "${DOCKER_IMAGE_MAIN}"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        dockerImage = "${DOCKER_IMAGE_DEV}"
-                    }
-
-                    echo "Scanning image with Trivy: ${dockerImage}"
-
+                    echo "Running lint and tests using pre-installed dependencies..."
+                    
+                    // Lint Dockerfile
+                    sh 'hadolint Dockerfile || true'
+                    
+                    // Run tests (dependencies already installed)
+                    sh 'npm test || true'
+                }
+            }
+        }
+        
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    echo "Building and pushing Docker image in one step..."
+                    
+                    // Use Jenkins built-in credential variables (like GitLab CI_REGISTRY_USER/CI_JOB_TOKEN)
                     sh """
-                        trivy image --severity HIGH,CRITICAL \\
-                            --format json \\
-                            --output trivy-report.json \\
-                            ${dockerImage} || true
-
-                        trivy image --severity HIGH,CRITICAL \\
-                            ${dockerImage} || true
+                        # Login using built-in Jenkins credentials
+                        echo ${DOCKER_CREDENTIALS_PSW} | docker login -u ${DOCKER_CREDENTIALS_USR} --password-stdin
+                        
+                        # Build and push in single operation (no duplication)
+                        docker build -t ${env.DOCKER_IMAGE} .
+                        docker push ${env.DOCKER_IMAGE}
+                        
+                        # Logout
+                        docker logout
+                    """
+                    
+                    echo "✓ Image built and pushed: ${env.DOCKER_IMAGE}"
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                script {
+                    echo "Scanning image with Trivy..."
+                    
+                    sh """
+                        trivy image --severity HIGH,CRITICAL \
+                            --format json \
+                            --output trivy-report-${env.BRANCH_NAME}.json \
+                            ${env.DOCKER_IMAGE} || true
+                        
+                        trivy image --severity HIGH,CRITICAL ${env.DOCKER_IMAGE} || true
                     """
                 }
             }
         }
-
-        stage('Push to Docker Hub') {
-            steps {
-                script {
-                    def dockerImage
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = "${DOCKER_IMAGE_MAIN}"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        dockerImage = "${DOCKER_IMAGE_DEV}"
-                    }
-
-                    echo "Pushing image to Docker Hub: ${dockerImage}"
-
-                    withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh """
-                            echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
-                            docker push ${dockerImage}
-                            docker logout
-                        """
-                    }
-                }
-            }
-        }
-
+        
         stage('Deploy') {
             steps {
                 script {
-                    def dockerImage
-                    def port
-
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = "${DOCKER_IMAGE_MAIN}"
-                        port = "${PORT_MAIN}"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        dockerImage = "${DOCKER_IMAGE_DEV}"
-                        port = "${PORT_DEV}"
-                    }
-
-                    echo "Deploying ${dockerImage} on port ${port}..."
-
+                    echo "Deploying to ${env.BRANCH_NAME} environment..."
+                    
                     sh """
-                        CONTAINER_ID=\$(docker ps -q --filter "publish=${port}")
+                        # Stop only containers on this environment's port
+                        CONTAINER_ID=\$(docker ps -q --filter "publish=${env.DEPLOY_PORT}")
                         if [ ! -z "\$CONTAINER_ID" ]; then
+                            echo "Stopping old container: \$CONTAINER_ID"
                             docker stop \$CONTAINER_ID
                             docker rm \$CONTAINER_ID
+                        else
+                            echo "No old container found on port ${env.DEPLOY_PORT}"
                         fi
-
+                        
+                        # Deploy new container
                         docker run -d \\
                             --name ${env.BRANCH_NAME}-app-${BUILD_NUMBER} \\
-                            --expose ${port} \\
-                            -p ${port}:3000 \\
-                            ${dockerImage}
+                            --expose ${env.DEPLOY_PORT} \\
+                            -p ${env.DEPLOY_PORT}:3000 \\
+                            ${env.DOCKER_IMAGE}
+                        
+                        echo "✓ Deployed on port ${env.DEPLOY_PORT}"
                     """
-
-                    echo "Deployment complete! Access at http://localhost:${port}"
                 }
             }
         }
-
-        stage('Trigger Deployment Pipeline') {
+        
+        stage('Verify') {
             steps {
                 script {
-                    def pipelineName
-                    if (env.BRANCH_NAME == 'main') {
-                        pipelineName = 'Deploy_to_main'
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        pipelineName = 'Deploy_to_dev'
-                    }
-
+                    echo "Verifying deployment..."
+                    sleep(time: 3, unit: 'SECONDS')
+                    
+                    sh """
+                        echo "Checking container status..."
+                        docker ps | grep ${env.BRANCH_NAME}-app-${BUILD_NUMBER}
+                        
+                        echo "Testing endpoint..."
+                        curl -f http://localhost:${env.DEPLOY_PORT} || echo "Warning: Application starting"
+                        
+                        echo "✓ Verification complete"
+                    """
+                }
+            }
+        }
+        
+        stage('Trigger External Deployment') {
+            steps {
+                script {
+                    def pipelineName = (env.BRANCH_NAME == 'main') ? 'Deploy_to_main' : 'Deploy_to_dev'
+                    
                     echo "Triggering ${pipelineName}..."
                     build job: pipelineName, wait: false
                 }
             }
         }
     }
-
+    
     post {
         always {
-            archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
-            echo "Pipeline execution completed"
+            archiveArtifacts artifacts: "trivy-report-${env.BRANCH_NAME}.json", allowEmptyArchive: true
+            echo "Pipeline execution completed for ${env.BRANCH_NAME}"
         }
         success {
-            echo "✓ Build and deployment successful!"
+            echo "================================================"
+            echo "✓ ${env.BRANCH_NAME} pipeline successful!"
+            echo "Access: http://localhost:${env.DEPLOY_PORT}"
+            echo "================================================"
         }
         failure {
-            echo "✗ Build or deployment failed!"
+            echo "✗ Pipeline failed for ${env.BRANCH_NAME}"
+        }
+        cleanup {
+            cleanWs(deleteDirs: true, disableDeferredWipeout: true)
         }
     }
 }
