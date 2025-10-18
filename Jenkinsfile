@@ -98,11 +98,11 @@ pipeline {
                     echo "Pushing image to Docker Hub: ${dockerImage}"
                     
                     withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        sh """
+                            echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
                             docker push ${dockerImage}
                             docker logout
-                        '''
+                        """
                     }
                 }
             }
