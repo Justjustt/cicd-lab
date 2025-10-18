@@ -6,8 +6,10 @@ pipeline {
     }
     
     environment {
-        DOCKER_IMAGE_MAIN = 'nodemain:v1.0'
-        DOCKER_IMAGE_DEV = 'nodedev:v1.0'
+        DOCKERHUB_REPO = 'jus7'
+        DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
+        DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
+        DOCKER_CREDENTIALS = 'dockerhub-credentials'
         PORT_MAIN = '3000'
         PORT_DEV = '3001'
     }
@@ -49,6 +51,29 @@ pipeline {
             }
         }
         
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    def dockerImage
+                    if (env.BRANCH_NAME == 'main') {
+                        dockerImage = "${DOCKER_IMAGE_MAIN}"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        dockerImage = "${DOCKER_IMAGE_DEV}"
+                    }
+                    
+                    echo "Pushing image to Docker Hub: ${dockerImage}"
+                    
+                    withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            docker push ${dockerImage}
+                            docker logout
+                        '''
+                    }
+                }
+            }
+        }
+        
         stage('Deploy') {
             steps {
                 script {
@@ -65,21 +90,13 @@ pipeline {
                     
                     echo "Deploying ${dockerImage} on port ${port}..."
                     
-                    // Stop and remove ONLY containers for this specific environment
                     sh """
-                        echo "Stopping containers for ${env.BRANCH_NAME} environment..."
                         CONTAINER_ID=\$(docker ps -q --filter "publish=${port}")
                         if [ ! -z "\$CONTAINER_ID" ]; then
-                            echo "Stopping container: \$CONTAINER_ID"
                             docker stop \$CONTAINER_ID
                             docker rm \$CONTAINER_ID
-                        else
-                            echo "No running container found on port ${port}"
                         fi
-                    """
-                    
-                    // Run new container
-                    sh """
+                        
                         docker run -d \\
                             --name ${env.BRANCH_NAME}-app-${BUILD_NUMBER} \\
                             --expose ${port} \\
@@ -91,17 +108,27 @@ pipeline {
                 }
             }
         }
+        
+        stage('Trigger Deployment Pipeline') {
+            steps {
+                script {
+                    def pipelineName
+                    if (env.BRANCH_NAME == 'main') {
+                        pipelineName = 'Deploy_to_main'
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        pipelineName = 'Deploy_to_dev'
+                    }
+                    
+                    echo "Triggering ${pipelineName}..."
+                    build job: pipelineName, wait: false
+                }
+            }
+        }
     }
     
     post {
         always {
             echo "Pipeline execution completed"
-        }
-        success {
-            echo "Build and deployment successful!"
-        }
-        failure {
-            echo "Build or deployment failed!"
         }
     }
 }
