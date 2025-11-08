@@ -9,15 +9,10 @@ pipeline {
     
     environment {
         DOCKERHUB_REPO = 'jus7'
-        DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
-        DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
-        // Built-in credentials (Jenkins equivalent of GitLab's CI_REGISTRY_USER/CI_JOB_TOKEN)
-        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKER_IMAGE_MAIN = 'jus7/cicd-lab-main:v1.0'
+        DOCKER_IMAGE_DEV = 'jus7/cicd-lab-dev:v1.0'
         PORT_MAIN = '3000'
         PORT_DEV = '3001'
-        // Dynamic variables
-        DOCKER_IMAGE = ''
-        DEPLOY_PORT = ''
     }
     
     stages {
@@ -87,18 +82,22 @@ pipeline {
             steps {
                 script {
                     echo "Building and pushing Docker image in one step..."
+                    echo "Target image: ${env.DOCKER_IMAGE}"
                     
-                    // Use Jenkins built-in credential variables (like GitLab CI_REGISTRY_USER/CI_JOB_TOKEN)
-                    sh """
-                        # Login using built-in Jenkins credentials
-                        echo ${DOCKER_CREDENTIALS_PSW} | docker login -u ${DOCKER_CREDENTIALS_USR} --password-stdin
-                        
-                        # Build and push in single operation (no duplication)
-                        docker build -t ${env.DOCKER_IMAGE} .
-                        docker push ${env.DOCKER_IMAGE}
-                        
-                        docker logout
-                    """
+                    // Use Jenkins built-in credential variables (secure way)
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            # Login using credentials
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            
+                            # Build and push in single operation (no duplication)
+                            docker build -t ''' + env.DOCKER_IMAGE + ''' .
+                            docker push ''' + env.DOCKER_IMAGE + '''
+                            
+                            # Logout
+                            docker logout
+                        '''
+                    }
                     
                     echo "✓ Image built and pushed: ${env.DOCKER_IMAGE}"
                 }

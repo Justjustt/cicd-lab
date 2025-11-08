@@ -16,9 +16,7 @@ pipeline {
     
     environment {
         DOCKERHUB_REPO = 'jus7'
-        // Built-in credentials (Jenkins equivalent of GitLab's CI_REGISTRY_USER/CI_JOB_TOKEN)
         DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
-        // Dynamic variables
         DOCKER_IMAGE = ''
         DEPLOY_PORT = ''
     }
