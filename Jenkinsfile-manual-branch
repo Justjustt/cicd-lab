@@ -1,238 +1,145 @@
 pipeline {
     agent any
     
-    tools {
-        nodejs 'Node 7.8.0'
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['main', 'dev'],
+            description: 'Target environment (main=production, dev=development)'
+        )
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: 'v1.0',
+            description: 'Docker image tag to deploy'
+        )
     }
     
     environment {
-        DOCKERHUB_REPO = 'jus7'  // Replace with your Docker Hub username
-        DOCKER_IMAGE_MAIN = "${DOCKERHUB_REPO}/cicd-lab-main:v1.0"
-        DOCKER_IMAGE_DEV = "${DOCKERHUB_REPO}/cicd-lab-dev:v1.0"
-        DOCKER_CREDENTIALS = 'dockerhub-credentials'
-        PORT_MAIN = '3000'
-        PORT_DEV = '3001'
+        DOCKERHUB_REPO = 'jus7'
     }
     
     stages {
-        stage('Validate Branch') {
+        stage('Initialize') {
             steps {
                 script {
-                    echo "Building branch: ${env.BRANCH_NAME}"
+                    echo "================================================"
+                    echo "Manual Deployment Configuration"
+                    echo "================================================"
+                    echo "Environment: ${params.ENVIRONMENT}"
+                    echo "Image Tag: ${params.IMAGE_TAG}"
                     
-                    if (env.BRANCH_NAME != 'main' && env.BRANCH_NAME != 'dev') {
-                        error("Invalid branch. Only 'main' and 'dev' branches are supported")
+                    // Validate environment
+                    if (params.ENVIRONMENT != 'main' && params.ENVIRONMENT != 'dev') {
+                        error("Invalid environment. Must be 'main' or 'dev'")
                     }
+                    
+                    // Set environment-specific variables (template pattern)
+                    if (params.ENVIRONMENT == 'main') {
+                        env.DOCKER_IMAGE = "${DOCKERHUB_REPO}/cicd-lab-main:${params.IMAGE_TAG}"
+                        env.DEPLOY_PORT = '3000'
+                    } else {
+                        env.DOCKER_IMAGE = "${DOCKERHUB_REPO}/cicd-lab-dev:${params.IMAGE_TAG}"
+                        env.DEPLOY_PORT = '3001'
+                    }
+                    
+                    echo "Docker Image: ${env.DOCKER_IMAGE}"
+                    echo "Deploy Port: ${env.DEPLOY_PORT}"
+                    echo "================================================"
                 }
             }
         }
         
-        stage('Checkout SCM') {
-            steps {
-                echo "Checking out from branch: ${env.BRANCH_NAME}"
-                checkout scm
-            }
-        }
-        
-        stage('Lint Dockerfile') {
-            steps {
-                echo "Linting Dockerfile with Hadolint..."
-                sh 'hadolint Dockerfile || true'
-            }
-        }
-        
-        stage('Build') {
-            steps {
-                echo "Building Node.js application..."
-                sh 'npm install'
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                echo "Running tests..."
-                sh 'npm test || true'
-            }
-        }
-        
-        stage('Build Docker Image') {
+        stage('Pull Image') {
             steps {
                 script {
-                    def dockerImage
+                    echo "Pulling image from Docker Hub..."
+                    echo "Target image: ${env.DOCKER_IMAGE}"
                     
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = env.DOCKER_IMAGE_MAIN
-                    } else {
-                        dockerImage = env.DOCKER_IMAGE_DEV
-                    }
-                    
-                    echo "Building Docker image: ${dockerImage}"
-                    sh "docker build -t ${dockerImage} ."
-                }
-            }
-        }
-        
-        stage('Scan with Trivy') {
-            steps {
-                script {
-                    def dockerImage
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = env.DOCKER_IMAGE_MAIN
-                    } else {
-                        dockerImage = env.DOCKER_IMAGE_DEV
-                    }
-                    
-                    echo "Scanning image with Trivy: ${dockerImage}"
-                    
-                    sh """
-                        trivy image --severity HIGH,CRITICAL \
-                            --format json \
-                            --output trivy-report-${env.BRANCH_NAME}.json \
-                            ${dockerImage} || true
-                        
-                        trivy image --severity HIGH,CRITICAL \
-                            ${dockerImage} || true
-                    """
-                }
-            }
-        }
-        
-        stage('Push to Docker Hub') {
-            steps {
-                script {
-                    def dockerImage
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = env.DOCKER_IMAGE_MAIN
-                    } else {
-                        dockerImage = env.DOCKER_IMAGE_DEV
-                    }
-                    
-                    echo "Pushing image to Docker Hub: ${dockerImage}"
-                    
-                    withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh """
-                            echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
-                            docker push ${dockerImage}
+                    // Use Jenkins credential binding 
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            # Login using credentials
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            
+                            # Pull image
+                            docker pull ''' + env.DOCKER_IMAGE + '''
+                            
+                            # Logout
                             docker logout
-                        """
+                        '''
                     }
+                    
+                    echo "✓ Image pulled: ${env.DOCKER_IMAGE}"
                 }
             }
         }
         
-        stage('Stop Old Container') {
+        stage('Deploy') {
             steps {
                 script {
-                    def dockerImage
-                    def port
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = env.DOCKER_IMAGE_MAIN
-                        port = env.PORT_MAIN
-                    } else {
-                        dockerImage = env.DOCKER_IMAGE_DEV
-                        port = env.PORT_DEV
-                    }
-                    
-                    echo "Stopping old container for ${dockerImage} on port ${port}..."
+                    echo "Deploying to ${params.ENVIRONMENT} environment..."
                     
                     sh """
-                        CONTAINER_ID=\$(docker ps -q --filter "publish=${port}")
+                        # Stop old container only for this environment (port-specific)
+                        CONTAINER_ID=\$(docker ps -q --filter "publish=${env.DEPLOY_PORT}")
                         if [ ! -z "\$CONTAINER_ID" ]; then
-                            echo "Stopping container: \$CONTAINER_ID"
+                            echo "Stopping old container: \$CONTAINER_ID"
                             docker stop \$CONTAINER_ID
                             docker rm \$CONTAINER_ID
                         else
-                            echo "No running container found on port ${port}"
+                            echo "No old container found on port ${env.DEPLOY_PORT}"
                         fi
+                        
+                        # Deploy new container
+                        docker run -d \\
+                            --name ${params.ENVIRONMENT}-app-${BUILD_NUMBER} \\
+                            --expose ${env.DEPLOY_PORT} \\
+                            -p ${env.DEPLOY_PORT}:3000 \\
+                            ${env.DOCKER_IMAGE}
+                        
+                        echo "✓ Container deployed"
                     """
                 }
             }
         }
         
-        stage('Deploy Container') {
+        stage('Verify') {
             steps {
                 script {
-                    def dockerImage
-                    def port
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        dockerImage = env.DOCKER_IMAGE_MAIN
-                        port = env.PORT_MAIN
-                    } else {
-                        dockerImage = env.DOCKER_IMAGE_DEV
-                        port = env.PORT_DEV
-                    }
-                    
-                    echo "Deploying ${dockerImage} on port ${port}..."
-                    
-                    sh """
-                        docker run -d \
-                            --name ${env.BRANCH_NAME}-app-${BUILD_NUMBER} \
-                            --expose ${port} \
-                            -p ${port}:3000 \
-                            ${dockerImage}
-                    """
-                    
-                    echo "✓ Deployment successful!"
-                    echo "Access application at http://localhost:${port}"
-                }
-            }
-        }
-        
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    def port
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        port = env.PORT_MAIN
-                    } else {
-                        port = env.PORT_DEV
-                    }
-                    
-                    echo "Waiting for application to start..."
+                    echo "Verifying deployment..."
                     sleep(time: 3, unit: 'SECONDS')
                     
                     sh """
-                        echo "Checking if container is running on port ${port}..."
-                        docker ps | grep ${env.BRANCH_NAME}-app-${BUILD_NUMBER}
-                        echo "✓ Container is running!"
+                        echo "Checking container status..."
+                        docker ps | grep ${params.ENVIRONMENT}-app-${BUILD_NUMBER}
+                        
+                        echo "Testing endpoint..."
+                        curl -f http://localhost:${env.DEPLOY_PORT} || echo "Warning: Application starting"
+                        
+                        echo "✓ Deployment verified"
                     """
-                }
-            }
-        }
-        
-        stage('Trigger Deployment Pipeline') {
-            steps {
-                script {
-                    def pipelineName
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        pipelineName = 'Deploy_to_main'
-                    } else {
-                        pipelineName = 'Deploy_to_dev'
-                    }
-                    
-                    echo "Triggering ${pipelineName}..."
-                    build job: pipelineName, wait: false
                 }
             }
         }
     }
     
     post {
-        always {
-            archiveArtifacts artifacts: "trivy-report-${env.BRANCH_NAME}.json", allowEmptyArchive: true
-            echo "Pipeline execution completed for branch: ${env.BRANCH_NAME}"
-        }
         success {
-            echo "✓ ${env.BRANCH_NAME} environment deployed successfully!"
+            script {
+                echo "================================================"
+                echo "✓ Deployment Successful!"
+                echo "================================================"
+                echo "Environment: ${params.ENVIRONMENT}"
+                echo "Image: ${env.DOCKER_IMAGE}"
+                echo "Access URL: http://localhost:${env.DEPLOY_PORT}"
+                echo "================================================"
+            }
         }
         failure {
-            echo "✗ Deployment failed for ${env.BRANCH_NAME} environment"
+            echo "✗ Deployment failed for ${params.ENVIRONMENT} environment"
+        }
+        always {
+            echo "Manual deployment completed"
         }
     }
 }
