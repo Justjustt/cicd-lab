@@ -9,8 +9,6 @@ pipeline {
     
     environment {
         DOCKERHUB_REPO = 'jus7'
-        DOCKER_IMAGE_MAIN = 'jus7/cicd-lab-main:v1.0'
-        DOCKER_IMAGE_DEV = 'jus7/cicd-lab-dev:v1.0'
         PORT_MAIN = '3000'
         PORT_DEV = '3001'
     }
@@ -19,21 +17,20 @@ pipeline {
         stage('Initialize') {
             steps {
                 script {
-                    echo "================================================"
                     echo "Building branch: ${env.BRANCH_NAME}"
-                    echo "================================================"
                     
-                    // Validate branch
                     if (env.BRANCH_NAME != 'main' && env.BRANCH_NAME != 'dev') {
                         error("Invalid branch. Only 'main' and 'dev' branches are supported")
                     }
                     
-                    // Set environment variables based on branch
+                    //generatnig tag with git rev-parse from git commit hash
+                    def gitCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    
                     if (env.BRANCH_NAME == 'main') {
-                        env.DOCKER_IMAGE = env.DOCKER_IMAGE_MAIN
+                        env.DOCKER_IMAGE = "${DOCKERHUB_REPO}/cicd-lab-main:${gitCoommit}"
                         env.DEPLOY_PORT = env.PORT_MAIN
                     } else {
-                        env.DOCKER_IMAGE = env.DOCKER_IMAGE_DEV
+                        env.DOCKER_IMAGE = "${DOCKERHUB_REPO}/cicde-lab-dev:${gitCommit}"
                         env.DEPLOY_PORT = env.PORT_DEV
                     }
                     
@@ -52,12 +49,10 @@ pipeline {
         stage('Setup Dependencies') {
             steps {
                 script {
-                    echo "Installing dependencies once (template pattern)..."
+                    echo "Installing dependencies"
                     sh '''
-                        # Install application dependencies
                         npm install
                         
-                        # Install dev dependencies for linting and testing
                         npm install --save-dev || true
                     '''
                 }
@@ -67,12 +62,10 @@ pipeline {
         stage('Lint & Test') {
             steps {
                 script {
-                    echo "Running lint and tests using pre-installed dependencies..."
+                    echo "Running lint and tests"
                     
-                    // Lint Dockerfile
                     sh 'hadolint Dockerfile || true'
                     
-                    // Run tests (dependencies already installed)
                     sh 'npm test || true'
                 }
             }
@@ -81,25 +74,21 @@ pipeline {
         stage('Build & Push Docker Image') {
             steps {
                 script {
-                    echo "Building and pushing Docker image in one step..."
-                    echo "Target image: ${env.DOCKER_IMAGE}"
+                    echo "Building and pushing Docker image"
+                    echo "Image: ${env.DOCKER_IMAGE}"
                     
-                    // Use Jenkins built-in credential variables (secure way)
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
-                            # Login using credentials
                             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
                             
-                            # Build and push in single operation (no duplication)
                             docker build -t ''' + env.DOCKER_IMAGE + ''' .
                             docker push ''' + env.DOCKER_IMAGE + '''
                             
-                            # Logout
                             docker logout
                         '''
                     }
                     
-                    echo "✓ Image built and pushed: ${env.DOCKER_IMAGE}"
+                    echo "Image built and pushed: ${env.DOCKER_IMAGE}"
                 }
             }
         }
@@ -107,7 +96,7 @@ pipeline {
         stage('Security Scan') {
             steps {
                 script {
-                    echo "Scanning image with Trivy..."
+                    echo "Scanning image with Trivy"
                     
                     sh """
                         trivy image --severity HIGH,CRITICAL \
@@ -124,10 +113,9 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    echo "Deploying to ${env.BRANCH_NAME} environment..."
+                    echo "Deploying to ${env.BRANCH_NAME} environment"
                     
                     sh """
-                        # Stop only containers on this environment's port
                         CONTAINER_ID=\$(docker ps -q --filter "publish=${env.DEPLOY_PORT}")
                         if [ ! -z "\$CONTAINER_ID" ]; then
                             echo "Stopping old container: \$CONTAINER_ID"
@@ -137,14 +125,13 @@ pipeline {
                             echo "No old container found on port ${env.DEPLOY_PORT}"
                         fi
                         
-                        # Deploy new container
                         docker run -d \\
                             --name ${env.BRANCH_NAME}-app-${BUILD_NUMBER} \\
                             --expose ${env.DEPLOY_PORT} \\
                             -p ${env.DEPLOY_PORT}:3000 \\
                             ${env.DOCKER_IMAGE}
                         
-                        echo "✓ Deployed on port ${env.DEPLOY_PORT}"
+                        echo "Deployed on port ${env.DEPLOY_PORT}"
                     """
                 }
             }
@@ -153,17 +140,17 @@ pipeline {
         stage('Verify') {
             steps {
                 script {
-                    echo "Verifying deployment..."
+                    echo "Verifying deployment"
                     sleep(time: 3, unit: 'SECONDS')
                     
                     sh """
-                        echo "Checking container status..."
+                        echo "Checking container status"
                         docker ps | grep ${env.BRANCH_NAME}-app-${BUILD_NUMBER}
                         
-                        echo "Testing endpoint..."
+                        echo "Testing endpoint"
                         curl -f http://localhost:${env.DEPLOY_PORT} || echo "Warning: Application starting"
                         
-                        echo "✓ Verification complete"
+                        echo "Verification complete"
                     """
                 }
             }
@@ -174,7 +161,7 @@ pipeline {
                 script {
                     def pipelineName = (env.BRANCH_NAME == 'main') ? 'Deploy_to_main' : 'Deploy_to_dev'
                     
-                    echo "Triggering ${pipelineName}..."
+                    echo "Triggering ${pipelineName}"
                     build job: pipelineName, wait: false
                 }
             }
@@ -187,13 +174,10 @@ pipeline {
             echo "Pipeline execution completed for ${env.BRANCH_NAME}"
         }
         success {
-            echo "================================================"
-            echo "✓ ${env.BRANCH_NAME} pipeline successful!"
-            echo "Access: http://localhost:${env.DEPLOY_PORT}"
-            echo "================================================"
+            echo "${env.BRANCH_NAME} pipeline successful! Access: http://localhost:${env.DEPLOY_PORT}"
         }
         failure {
-            echo "✗ Pipeline failed for ${env.BRANCH_NAME}"
+            echo "Pipeline failed for ${env.BRANCH_NAME}"
         }
         cleanup {
             cleanWs(deleteDirs: true, disableDeferredWipeout: true)
