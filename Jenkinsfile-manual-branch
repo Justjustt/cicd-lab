@@ -16,7 +16,6 @@ pipeline {
     
     environment {
         DOCKERHUB_REPO = 'jus7'
-        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
         DOCKER_IMAGE = ''
         DEPLOY_PORT = ''
     }
@@ -25,18 +24,13 @@ pipeline {
         stage('Initialize') {
             steps {
                 script {
-                    echo "================================================"
-                    echo "Manual Deployment Configuration"
-                    echo "================================================"
                     echo "Environment: ${params.ENVIRONMENT}"
                     echo "Image Tag: ${params.IMAGE_TAG}"
                     
-                    // Validate environment
                     if (params.ENVIRONMENT != 'main' && params.ENVIRONMENT != 'dev') {
                         error("Invalid environment. Must be 'main' or 'dev'")
                     }
                     
-                    // Set environment-specific variables (template pattern)
                     if (params.ENVIRONMENT == 'main') {
                         env.DOCKER_IMAGE = "${DOCKERHUB_REPO}/cicd-lab-main:${params.IMAGE_TAG}"
                         env.DEPLOY_PORT = '3000'
@@ -47,7 +41,6 @@ pipeline {
                     
                     echo "Docker Image: ${env.DOCKER_IMAGE}"
                     echo "Deploy Port: ${env.DEPLOY_PORT}"
-                    echo "================================================"
                 }
             }
         }
@@ -55,21 +48,17 @@ pipeline {
         stage('Pull Image') {
             steps {
                 script {
-                    echo "Pulling image from Docker Hub..."
+                    echo "Pulling image from Docker Hub."
                     
-                    // Use Jenkins built-in credential variables (like GitLab CI_REGISTRY_USER/CI_JOB_TOKEN)
+                    withCredentials([usernamePassword( credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')])
+                    
                     sh """
-                        # Login using built-in credentials
-                        echo ${DOCKER_CREDENTIALS_PSW} | docker login -u ${DOCKER_CREDENTIALS_USR} --password-stdin
-                        
-                        # Pull image
+                        echo \$DOCKER_PASS | docker login -u \DOCKER_USER --password-stdin    
                         docker pull ${env.DOCKER_IMAGE}
-                        
-                        # Logout
                         docker logout
                     """
                     
-                    echo "✓ Image pulled: ${env.DOCKER_IMAGE}"
+                    echo "Image pulled: ${env.DOCKER_IMAGE}"
                 }
             }
         }
@@ -77,10 +66,9 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    echo "Deploying to ${params.ENVIRONMENT} environment..."
+                    echo "Deploying to ${params.ENVIRONMENT} environment"
                     
                     sh """
-                        # Stop old container only for this environment (port-specific)
                         CONTAINER_ID=\$(docker ps -q --filter "publish=${env.DEPLOY_PORT}")
                         if [ ! -z "\$CONTAINER_ID" ]; then
                             echo "Stopping old container: \$CONTAINER_ID"
@@ -90,14 +78,12 @@ pipeline {
                             echo "No old container found on port ${env.DEPLOY_PORT}"
                         fi
                         
-                        # Deploy new container
                         docker run -d \\
                             --name ${params.ENVIRONMENT}-app-${BUILD_NUMBER} \\
-                            --expose ${env.DEPLOY_PORT} \\
                             -p ${env.DEPLOY_PORT}:3000 \\
                             ${env.DOCKER_IMAGE}
                         
-                        echo "✓ Container deployed"
+                        echo "Container deployed"
                     """
                 }
             }
@@ -106,17 +92,17 @@ pipeline {
         stage('Verify') {
             steps {
                 script {
-                    echo "Verifying deployment..."
+                    echo "Verifying deployment"
                     sleep(time: 3, unit: 'SECONDS')
                     
                     sh """
-                        echo "Checking container status..."
+                        echo "Checking container status"
                         docker ps | grep ${params.ENVIRONMENT}-app-${BUILD_NUMBER}
                         
-                        echo "Testing endpoint..."
+                        echo "Testing endpoint"
                         curl -f http://localhost:${env.DEPLOY_PORT} || echo "Warning: Application starting"
                         
-                        echo "✓ Deployment verified"
+                        echo "Deployment verified"
                     """
                 }
             }
@@ -126,17 +112,13 @@ pipeline {
     post {
         success {
             script {
-                echo "================================================"
-                echo "✓ Deployment Successful!"
-                echo "================================================"
-                echo "Environment: ${params.ENVIRONMENT}"
+                echo "Deployment Successful! Environment: ${params.ENVIRONMENT}"
                 echo "Image: ${env.DOCKER_IMAGE}"
                 echo "Access URL: http://localhost:${env.DEPLOY_PORT}"
-                echo "================================================"
             }
         }
         failure {
-            echo "✗ Deployment failed for ${params.ENVIRONMENT} environment"
+            echo "Deployment failed for ${params.ENVIRONMENT} environment"
         }
         always {
             echo "Manual deployment completed"
